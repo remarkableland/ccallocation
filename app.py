@@ -88,7 +88,20 @@ def process_credit_card_data(df, amount_column):
     
     # Add validation columns - but we'll replace these with Excel formulas
     processed_df['Total_Allocated'] = processed_df[ENTITIES].sum(axis=1)
-    processed_df['Allocation_Check'] = processed_df[amount_column] - processed_df['Total_Allocated']
+    
+    # For allocation check, we need to compare against D+E sum, not original amount column
+    if len(columns) >= 6:
+        col_d = columns[3]  # Column D
+        col_e = columns[4]  # Column E
+        try:
+            d_values = pd.to_numeric(processed_df[col_d], errors='coerce').fillna(0)
+            e_values = pd.to_numeric(processed_df[col_e], errors='coerce').fillna(0)
+            processed_df['Allocation_Check'] = (d_values + e_values) - processed_df['Total_Allocated']
+        except:
+            processed_df['Allocation_Check'] = processed_df[amount_column] - processed_df['Total_Allocated']
+    else:
+        processed_df['Allocation_Check'] = processed_df[amount_column] - processed_df['Total_Allocated']
+    
     processed_df['Allocation_Status'] = processed_df['Allocation_Check'].apply(
         lambda x: 'Balanced' if abs(x) < 0.01 else f'Off by ${x:.2f}'
     )
@@ -150,8 +163,8 @@ def create_excel_with_formulas(df, amount_column):
         row_num = i + 2  # Excel rows start at 1, plus header row
         # Total_Allocated formula: sum of all entity columns
         enhanced_df.iloc[i, enhanced_df.columns.get_loc('Total_Allocated')] = f"=SUM({entity_range_start}{row_num}:{entity_range_end}{row_num})"
-        # Allocation_Check formula: Amount - Total_Allocated
-        enhanced_df.iloc[i, enhanced_df.columns.get_loc('Allocation_Check')] = f"={amount_col_letter}{row_num}-{total_allocated_col_letter}{row_num}"
+        # Allocation_Check formula: (Debit + Credit) - Total_Allocated
+        enhanced_df.iloc[i, enhanced_df.columns.get_loc('Allocation_Check')] = f"=(D{row_num}+E{row_num})-{total_allocated_col_letter}{row_num}"
         # Status formula: IF check is nearly zero, show balanced, else show difference (NO EMOJIS)
         enhanced_df.iloc[i, enhanced_df.columns.get_loc('Allocation_Status')] = f'=IF(ABS({allocation_check_col_letter}{row_num})<0.01,"Balanced","Off by $"&ROUND({allocation_check_col_letter}{row_num},2))'
         # Property formula: IF RLV22 LLC has a value, show "Required", else blank
@@ -181,8 +194,8 @@ def create_excel_with_formulas(df, amount_column):
     # Total_Allocated total
     totals_row['Total_Allocated'] = f"=SUM({total_allocated_col_letter}2:{total_allocated_col_letter}{num_rows + 1})"
     
-    # Allocation_Check total (should be zero if everything balances)
-    totals_row['Allocation_Check'] = f"=SUM({allocation_check_col_letter}2:{allocation_check_col_letter}{num_rows + 1})"
+    # Allocation_Check total (should be zero if everything balances) - sum of (D+E) minus total allocated
+    totals_row['Allocation_Check'] = f"=(SUM(D2:D{num_rows + 1})+SUM(E2:E{num_rows + 1}))-SUM({total_allocated_col_letter}2:{total_allocated_col_letter}{num_rows + 1})"
     
     # Status for totals row (NO EMOJIS)
     totals_row['Allocation_Status'] = f'=IF(ABS({allocation_check_col_letter}{totals_row_num})<0.01,"ALL BALANCED","TOTAL OFF by $"&ROUND({allocation_check_col_letter}{totals_row_num},2))'
@@ -211,8 +224,20 @@ def validate_allocations(df, amount_column):
         entity_totals[entity] = df[entity].sum()
     validation_results['entity_totals'] = entity_totals
     
-    # Overall totals
-    validation_results['total_transactions'] = df[amount_column].sum()
+    # Overall totals - use D+E sum instead of amount column for proper validation
+    columns = df.columns.tolist()
+    if len(columns) >= 6:
+        col_d = columns[3]  # Column D
+        col_e = columns[4]  # Column E
+        try:
+            d_total = pd.to_numeric(df[col_d], errors='coerce').fillna(0).sum()
+            e_total = pd.to_numeric(df[col_e], errors='coerce').fillna(0).sum()
+            validation_results['total_transactions'] = d_total + e_total
+        except:
+            validation_results['total_transactions'] = df[amount_column].sum()
+    else:
+        validation_results['total_transactions'] = df[amount_column].sum()
+    
     validation_results['total_allocated'] = df['Total_Allocated'].sum()
     validation_results['grand_total_check'] = validation_results['total_transactions'] - validation_results['total_allocated']
     
@@ -360,8 +385,17 @@ if uploaded_file is not None:
             # Download section
             st.subheader("📥 Download Processed Files")
             
-            # Generate timestamp for filenames
-            current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+            # Generate filename based on original file name
+            original_filename = uploaded_file.name
+            if original_filename.endswith('.csv'):
+                base_name = original_filename[:-4]  # Remove .csv extension
+                enhanced_filename = f"{base_name}_allocated.csv"
+                basic_filename = f"{base_name}_allocated_basic.csv"
+                summary_filename = f"{base_name}_allocated_summary.csv"
+            else:
+                enhanced_filename = f"{original_filename}_allocated.csv"
+                basic_filename = f"{original_filename}_allocated_basic.csv"
+                summary_filename = f"{original_filename}_allocated_summary.csv"
             
             # Create enhanced version with formulas and totals
             with st.spinner("Creating Excel-ready file with formulas..."):
@@ -374,9 +408,9 @@ if uploaded_file is not None:
                 st.write("**📊 Main Allocation File (with formulas & totals):**")
                 enhanced_csv = enhanced_df.to_csv(index=False)
                 st.download_button(
-                    label="📄 Download Enhanced_Allocations.csv",
+                    label="📄 Download Enhanced Allocations",
                     data=enhanced_csv,
-                    file_name=f"enhanced_credit_card_allocations_{current_time}.csv",
+                    file_name=enhanced_filename,
                     mime="text/csv"
                 )
                 st.caption("✅ Includes Excel formulas & totals row")
@@ -385,9 +419,9 @@ if uploaded_file is not None:
                 st.write("**📋 Basic Allocation File:**")
                 basic_csv = processed_df.to_csv(index=False)
                 st.download_button(
-                    label="📄 Download Basic_Allocations.csv",
+                    label="📄 Download Basic Allocations",
                     data=basic_csv,
-                    file_name=f"basic_credit_card_allocations_{current_time}.csv",
+                    file_name=basic_filename,
                     mime="text/csv"
                 )
                 st.caption("Standard CSV without formulas")
@@ -404,9 +438,9 @@ if uploaded_file is not None:
                 ])
                 summary_csv = summary_df.to_csv(index=False)
                 st.download_button(
-                    label="📊 Download Summary.csv",
+                    label="📊 Download Summary",
                     data=summary_csv,
-                    file_name=f"allocation_summary_{current_time}.csv",
+                    file_name=summary_filename,
                     mime="text/csv"
                 )
             
@@ -423,7 +457,7 @@ if uploaded_file is not None:
                 
                 **✅ Live Excel Formulas:**
                 - **Total_Allocated:** `=SUM(F2:K2)` (automatically sums entity columns)
-                - **Allocation_Check:** `=Amount-Total_Allocated` 
+                - **Allocation_Check:** `=(D2+E2)-L2` (Debit + Credit - Total_Allocated) 
                 - **Allocation_Status:** Shows "Balanced" or "Off by $X.XX" (CSV-friendly)
                 - **Property:** `=IF(RLV22<>0,"Required","")` (Shows "Required" if RLV22 LLC has value)
                 
