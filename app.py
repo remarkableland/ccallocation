@@ -390,59 +390,24 @@ if uploaded_file is not None:
             if original_filename.endswith('.csv'):
                 base_name = original_filename[:-4]  # Remove .csv extension
                 enhanced_filename = f"{base_name}_allocated.csv"
-                basic_filename = f"{base_name}_allocated_basic.csv"
-                summary_filename = f"{base_name}_allocated_summary.csv"
             else:
                 enhanced_filename = f"{original_filename}_allocated.csv"
-                basic_filename = f"{original_filename}_allocated_basic.csv"
-                summary_filename = f"{original_filename}_allocated_summary.csv"
             
             # Create enhanced version with formulas and totals
             with st.spinner("Creating Excel-ready file with formulas..."):
                 enhanced_df = create_excel_with_formulas(processed_df, amount_column)
             
-            # Main allocation CSV with formulas
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                st.write("**📊 Main Allocation File (with formulas & totals):**")
-                enhanced_csv = enhanced_df.to_csv(index=False)
-                st.download_button(
-                    label="📄 Download Enhanced Allocations",
-                    data=enhanced_csv,
-                    file_name=enhanced_filename,
-                    mime="text/csv"
-                )
-                st.caption("✅ Includes Excel formulas & totals row")
-            
-            with col2:
-                st.write("**📋 Basic Allocation File:**")
-                basic_csv = processed_df.to_csv(index=False)
-                st.download_button(
-                    label="📄 Download Basic Allocations",
-                    data=basic_csv,
-                    file_name=basic_filename,
-                    mime="text/csv"
-                )
-                st.caption("Standard CSV without formulas")
-            
-            with col3:
-                st.write("**📊 Summary Report:**")
-                summary_df = pd.DataFrame([
-                    {'Metric': 'Total Transactions', 'Value': len(processed_df)},
-                    {'Metric': 'Total Amount', 'Value': f"${total_amount:,.2f}"},
-                    {'Metric': 'Total Allocated', 'Value': f"${total_allocated:,.2f}"},
-                    {'Metric': 'Allocation Check', 'Value': f"${allocation_difference:.2f}"},
-                    {'Metric': 'Unbalanced Transactions', 'Value': validation['unbalanced_count']},
-                    {'Metric': 'Amount Column Used', 'Value': amount_column}
-                ])
-                summary_csv = summary_df.to_csv(index=False)
-                st.download_button(
-                    label="📊 Download Summary",
-                    data=summary_csv,
-                    file_name=summary_filename,
-                    mime="text/csv"
-                )
+            # Main allocation CSV with formulas - single download option
+            st.write("**📊 Enhanced Allocation File (with formulas & totals):**")
+            enhanced_csv = enhanced_df.to_csv(index=False)
+            st.download_button(
+                label="📄 Download Allocated File",
+                data=enhanced_csv,
+                file_name=enhanced_filename,
+                mime="text/csv",
+                use_container_width=True
+            )
+            st.caption("✅ Includes Excel formulas, totals row, and property tracking")
             
             # Instructions for Excel usage
             with st.expander("📖 Excel Formula Features"):
