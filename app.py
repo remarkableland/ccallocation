@@ -413,7 +413,7 @@ if uploaded_file is not None:
                 worksheet = writer.sheets['Allocations']
                 
                 # Import openpyxl formatting
-                from openpyxl.styles import NamedStyle, Alignment
+                from openpyxl.styles import NamedStyle, Alignment, PatternFill, Font
                 from openpyxl.utils import get_column_letter
                 
                 # Create currency style
@@ -459,6 +459,55 @@ if uploaded_file is not None:
                 
                 # Set header row height to accommodate wrapped text
                 worksheet.row_dimensions[1].height = 30
+                
+                # Add conditional formatting for Allocation_Status and Property columns
+                red_fill = PatternFill(start_color='FFCCCC', end_color='FFCCCC', fill_type='solid')  # Light red background
+                red_font = Font(color='CC0000')  # Dark red text
+                
+                # Find Allocation_Status and Property column positions
+                allocation_status_col = None
+                property_col = None
+                
+                for col_num, col_name in enumerate(enhanced_df.columns, 1):
+                    if col_name == 'Allocation_Status':
+                        allocation_status_col = get_column_letter(col_num)
+                    elif col_name == 'Property':
+                        property_col = get_column_letter(col_num)
+                
+                # Apply conditional formatting to data rows (skip header and totals)
+                data_rows = len(enhanced_df) - 1  # Subtract 1 for totals row
+                
+                # Format Allocation_Status column: Red if not "Balanced"
+                if allocation_status_col:
+                    for row_num in range(2, data_rows + 1):  # Skip header row
+                        cell = worksheet[f'{allocation_status_col}{row_num}']
+                        # Check if cell contains formula that would result in "Off by"
+                        if hasattr(cell, 'value') and cell.value and isinstance(cell.value, str):
+                            if 'IF(' in str(cell.value):  # It's a formula
+                                # Apply conditional formatting based on the formula result
+                                # We'll format cells that don't show "Balanced"
+                                pass  # Excel conditional formatting will handle this
+                        # For now, we'll check the actual computed values after Excel processes them
+                
+                # Format Property column: Red if "Required"
+                if property_col:
+                    for row_num in range(2, data_rows + 1):  # Skip header row
+                        cell = worksheet[f'{property_col}{row_num}']
+                        # The cell contains a formula =IF(H2<>0,"Required","")
+                        # We need to use Excel's conditional formatting for this
+                
+                # Use Excel's built-in conditional formatting instead of cell-by-cell formatting
+                from openpyxl.formatting.rule import CellIsRule, FormulaRule
+                
+                # Conditional formatting for Allocation_Status: Red if not "Balanced"
+                if allocation_status_col:
+                    rule = CellIsRule(operator='notEqual', formula=['"Balanced"'], fill=red_fill, font=red_font)
+                    worksheet.conditional_formatting.add(f'{allocation_status_col}2:{allocation_status_col}{data_rows}', rule)
+                
+                # Conditional formatting for Property: Red if "Required"
+                if property_col:
+                    rule = CellIsRule(operator='equal', formula=['"Required"'], fill=red_fill, font=red_font)
+                    worksheet.conditional_formatting.add(f'{property_col}2:{property_col}{data_rows}', rule)
             
             output.seek(0)
             
@@ -469,7 +518,7 @@ if uploaded_file is not None:
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True
             )
-            st.caption("✅ Native Excel file with currency formatting, fixed-width columns, wrapped headers, formulas, and totals")
+            st.caption("✅ Native Excel file with currency formatting, fixed-width columns, wrapped headers, conditional formatting, formulas, and totals")
             
             # Instructions for Excel usage
             with st.expander("📖 Excel Formula Features"):
@@ -481,6 +530,12 @@ if uploaded_file is not None:
                 - **Panola Holdings LLC = Column D + Column E** (automatic sum)
                 - Handles both positive and negative amounts
                 - Falls back to amount column if D/E aren't numeric
+                
+                **✅ Visual Indicators:**
+                - **Allocation_Status:** Red highlighting when not "Balanced"
+                - **Property:** Red highlighting when "Required"
+                - **Currency formatting** for all dollar amounts
+                - **Fixed column widths** with wrapped headers
                 
                 **✅ Live Excel Formulas:**
                 - **Total_Allocated:** `=SUM(F2:K2)` (automatically sums entity columns)
