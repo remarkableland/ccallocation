@@ -439,8 +439,8 @@ if uploaded_file is not None:
                     'J': 18,   # Goodfire Realty LLC
                     'K': 12,   # NDRE III LLC
                     'L': 15,   # Total_Allocated
-                    'M': 15,   # Allocation_Check
-                    'N': 12,   # Allocation_Status
+                    'M': 10,   # Allocation_Check (narrower)
+                    'N': 10,   # Allocation_Status (narrower)
                     'O': 12    # Property
                 }
                 
