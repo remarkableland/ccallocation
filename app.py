@@ -207,15 +207,26 @@ if uploaded_file is not None:
                     st.write(f"• {entity}: ${total:,.2f}")
             
             # Download section
-            st.subheader("📥 Download Processed File")
+            st.subheader("📥 Download Processed Files")
             
-            # Create Excel file
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                # Main allocation sheet
-                processed_df.to_excel(writer, sheet_name='Allocations', index=False)
-                
-                # Summary sheet
+            # Generate timestamp for filenames
+            current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+            
+            # Main allocation CSV
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.write("**Main Allocation File:**")
+                allocation_csv = processed_df.to_csv(index=False)
+                st.download_button(
+                    label="📄 Download Allocations.csv",
+                    data=allocation_csv,
+                    file_name=f"credit_card_allocations_{current_time}.csv",
+                    mime="text/csv"
+                )
+            
+            with col2:
+                st.write("**Summary Report:**")
                 summary_df = pd.DataFrame([
                     {'Metric': 'Total Transactions', 'Value': len(processed_df)},
                     {'Metric': 'Total Amount', 'Value': f"${total_amount:,.2f}"},
@@ -224,27 +235,43 @@ if uploaded_file is not None:
                     {'Metric': 'Unbalanced Transactions', 'Value': validation['unbalanced_count']},
                     {'Metric': 'Amount Column Used', 'Value': amount_column}
                 ])
-                summary_df.to_excel(writer, sheet_name='Summary', index=False)
-                
-                # Entity totals sheet
+                summary_csv = summary_df.to_csv(index=False)
+                st.download_button(
+                    label="📊 Download Summary.csv",
+                    data=summary_csv,
+                    file_name=f"allocation_summary_{current_time}.csv",
+                    mime="text/csv"
+                )
+            
+            with col3:
+                st.write("**Entity Totals:**")
                 entity_df = pd.DataFrame([
-                    {'Entity': entity, 'Total': total} 
+                    {'Entity': entity, 'Total': f"${total:,.2f}"} 
                     for entity, total in validation['entity_totals'].items()
                 ])
-                entity_df.to_excel(writer, sheet_name='Entity_Totals', index=False)
+                entity_csv = entity_df.to_csv(index=False)
+                st.download_button(
+                    label="🏢 Download Entity_Totals.csv",
+                    data=entity_csv,
+                    file_name=f"entity_totals_{current_time}.csv",
+                    mime="text/csv"
+                )
             
-            output.seek(0)
-            
-            # Generate filename
-            current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"credit_card_allocations_{current_time}.xlsx"
-            
-            st.download_button(
-                label=f"📄 Download {filename}",
-                data=output.getvalue(),
-                file_name=filename,
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+            # Instructions for Excel conversion
+            with st.expander("📖 Converting to Excel"):
+                st.markdown("""
+                ### Converting CSV to Excel:
+                1. **Download the main allocation CSV** above
+                2. **Open in Excel** (or Google Sheets, LibreOffice Calc)
+                3. **Save As Excel format** (.xlsx) for easier editing
+                4. **Edit entity columns** to redistribute amounts
+                5. **Use Allocation_Check column** to verify your edits sum correctly
+                
+                ### Quick Excel Formula Tips:
+                - **Check row totals:** `=SUM(E2:J2)` (adjust column range for entity columns)
+                - **Verify balance:** `=D2-K2` (Amount minus Total_Allocated should be 0)
+                - **Conditional formatting:** Highlight cells where Allocation_Check ≠ 0
+                """)
 
     except Exception as e:
         st.error(f"Error processing file: {str(e)}")
@@ -257,8 +284,9 @@ if uploaded_file is not None:
             df_debug = pd.read_csv(uploaded_file)
             st.write(f"- Columns found: {list(df_debug.columns)}")
             st.write(f"- Data types: {dict(df_debug.dtypes)}")
-        except:
-            st.write("- Could not read file for debugging")
+            st.dataframe(df_debug.head(5))
+        except Exception as debug_error:
+            st.write(f"- Could not read file for debugging: {debug_error}")
 
 else:
     st.info("👆 Upload your credit card statement CSV to begin allocation")
@@ -290,8 +318,10 @@ else:
     - Balance validation for each transaction
     - Highlights any unbalanced transactions
     
-    ### 📊 Excel Output:
-    - **Allocations Sheet:** Full data with entity columns
-    - **Summary Sheet:** Metrics and validation results
-    - **Entity_Totals Sheet:** Breakdown by entity
+    ### 📊 CSV Output (No Dependencies):
+    - **Main Allocation File:** Full data with entity columns
+    - **Summary Report:** Metrics and validation results
+    - **Entity Totals:** Breakdown by entity
+    
+    **Convert to Excel:** Open any CSV in Excel and save as .xlsx for easier editing!
     """)
