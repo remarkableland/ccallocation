@@ -185,6 +185,9 @@ def create_excel_with_formulas(df, amount_column):
     # Amount column total
     totals_row[amount_column] = f"=SUM({amount_col_letter}2:{amount_col_letter}{num_rows + 1})"
     
+    # Add sum for column E (Credit column) - always column E regardless of amount column
+    totals_row[columns[4]] = f"=SUM(E2:E{num_rows + 1})"  # Column E is always the 5th column (index 4)
+    
     # Entity column totals
     for entity in ENTITIES:
         if entity in enhanced_df.columns:
