@@ -400,10 +400,47 @@ if uploaded_file is not None:
             # Main allocation Excel file with formulas - single download option
             st.write("**📊 Enhanced Allocation File (Excel with formulas & totals):**")
             
-            # Create Excel file in memory
+            # Create Excel file in memory with formatting
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 enhanced_df.to_excel(writer, sheet_name='Allocations', index=False)
+                
+                # Get the workbook and worksheet to add formatting
+                workbook = writer.book
+                worksheet = writer.sheets['Allocations']
+                
+                # Import openpyxl formatting
+                from openpyxl.styles import NamedStyle
+                from openpyxl.utils import get_column_letter
+                
+                # Create currency style
+                currency_style = NamedStyle(name="currency", number_format='$#,##0.00')
+                
+                # Apply currency formatting to columns D through M (columns 4-13)
+                num_rows = len(enhanced_df) + 1  # +1 for header
+                
+                for col_num in range(4, 14):  # Columns D(4) through M(13)
+                    col_letter = get_column_letter(col_num)
+                    for row_num in range(2, num_rows + 1):  # Skip header row
+                        cell = worksheet[f'{col_letter}{row_num}']
+                        cell.number_format = '$#,##0.00'
+                
+                # Auto-adjust column widths
+                for column in worksheet.columns:
+                    max_length = 0
+                    column_letter = column[0].column_letter
+                    
+                    for cell in column:
+                        try:
+                            if len(str(cell.value)) > max_length:
+                                max_length = len(str(cell.value))
+                        except:
+                            pass
+                    
+                    # Set column width (add some padding)
+                    adjusted_width = min(max_length + 2, 50)  # Cap at 50 characters
+                    worksheet.column_dimensions[column_letter].width = adjusted_width
+            
             output.seek(0)
             
             st.download_button(
@@ -413,7 +450,7 @@ if uploaded_file is not None:
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True
             )
-            st.caption("✅ Native Excel file with formulas, totals row, and property tracking")
+            st.caption("✅ Native Excel file with currency formatting, auto-width columns, formulas, and totals")
             
             # Instructions for Excel usage
             with st.expander("📖 Excel Formula Features"):
