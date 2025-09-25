@@ -410,7 +410,7 @@ if uploaded_file is not None:
                 worksheet = writer.sheets['Allocations']
                 
                 # Import openpyxl formatting
-                from openpyxl.styles import NamedStyle
+                from openpyxl.styles import NamedStyle, Alignment
                 from openpyxl.utils import get_column_letter
                 
                 # Create currency style
@@ -425,21 +425,37 @@ if uploaded_file is not None:
                         cell = worksheet[f'{col_letter}{row_num}']
                         cell.number_format = '$#,##0.00'
                 
-                # Auto-adjust column widths
-                for column in worksheet.columns:
-                    max_length = 0
-                    column_letter = column[0].column_letter
-                    
-                    for cell in column:
-                        try:
-                            if len(str(cell.value)) > max_length:
-                                max_length = len(str(cell.value))
-                        except:
-                            pass
-                    
-                    # Set column width (add some padding)
-                    adjusted_width = min(max_length + 2, 50)  # Cap at 50 characters
-                    worksheet.column_dimensions[column_letter].width = adjusted_width
+                # Set fixed column widths for better appearance
+                column_widths = {
+                    'A': 12,   # Status
+                    'B': 15,   # Date  
+                    'C': 35,   # Description
+                    'D': 12,   # Debit
+                    'E': 12,   # Credit
+                    'F': 18,   # Panola Holdings LLC
+                    'G': 18,   # Robert Dow (Personal)
+                    'H': 12,   # RLV22 LLC
+                    'I': 18,   # CSD Van Zandt LLC
+                    'J': 18,   # Goodfire Realty LLC
+                    'K': 12,   # NDRE III LLC
+                    'L': 15,   # Total_Allocated
+                    'M': 15,   # Allocation_Check
+                    'N': 12,   # Allocation_Status
+                    'O': 12    # Property
+                }
+                
+                # Apply fixed widths
+                for col_letter, width in column_widths.items():
+                    worksheet.column_dimensions[col_letter].width = width
+                
+                # Add text wrapping to header row
+                for col_num in range(1, len(enhanced_df.columns) + 1):
+                    col_letter = get_column_letter(col_num)
+                    header_cell = worksheet[f'{col_letter}1']
+                    header_cell.alignment = Alignment(wrap_text=True, horizontal='center', vertical='center')
+                
+                # Set header row height to accommodate wrapped text
+                worksheet.row_dimensions[1].height = 30
             
             output.seek(0)
             
@@ -450,7 +466,7 @@ if uploaded_file is not None:
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True
             )
-            st.caption("✅ Native Excel file with currency formatting, auto-width columns, formulas, and totals")
+            st.caption("✅ Native Excel file with currency formatting, fixed-width columns, wrapped headers, formulas, and totals")
             
             # Instructions for Excel usage
             with st.expander("📖 Excel Formula Features"):
