@@ -60,14 +60,18 @@ def process_credit_card_data(df, amount_column):
         processed_df[entity] = 0.0
     
     # DEFAULT ALLOCATION: All amounts (both positive charges AND negative credits) go to Panola Holdings LLC
-    processed_df['Panola Holdings LLC'] = processed_df[amount_column]
+    # This ensures ALL transactions, including credits/payments, default to Panola
+    processed_df['Panola Holdings LLC'] = processed_df[amount_column].copy()
     
     # Add validation columns - but we'll replace these with Excel formulas
     processed_df['Total_Allocated'] = processed_df[ENTITIES].sum(axis=1)
     processed_df['Allocation_Check'] = processed_df[amount_column] - processed_df['Total_Allocated']
     processed_df['Allocation_Status'] = processed_df['Allocation_Check'].apply(
-        lambda x: '✅ Balanced' if abs(x) < 0.01 else f'❌ Off by ${x:.2f}'
+        lambda x: 'Balanced' if abs(x) < 0.01 else f'Off by ${x:.2f}'
     )
+    
+    # Add Property column at the end
+    processed_df['Property'] = ''
     
     return processed_df
 
@@ -86,6 +90,8 @@ def create_excel_with_formulas(df, amount_column):
     
     total_allocated_col_idx = columns.index('Total_Allocated') + 1
     allocation_check_col_idx = columns.index('Allocation_Check') + 1
+    property_col_idx = columns.index('Property') + 1
+    rlv22_col_idx = columns.index('RLV22 LLC') + 1
     
     # Convert to Excel column letters
     def num_to_excel_col(n):
@@ -99,6 +105,8 @@ def create_excel_with_formulas(df, amount_column):
     amount_col_letter = num_to_excel_col(amount_col_idx)
     total_allocated_col_letter = num_to_excel_col(total_allocated_col_idx)
     allocation_check_col_letter = num_to_excel_col(allocation_check_col_idx)
+    property_col_letter = num_to_excel_col(property_col_idx)
+    rlv22_col_letter = num_to_excel_col(rlv22_col_idx)
     
     # Entity column letters
     entity_col_letters = {}
@@ -121,8 +129,10 @@ def create_excel_with_formulas(df, amount_column):
         enhanced_df.iloc[i, enhanced_df.columns.get_loc('Total_Allocated')] = f"=SUM({entity_range_start}{row_num}:{entity_range_end}{row_num})"
         # Allocation_Check formula: Amount - Total_Allocated
         enhanced_df.iloc[i, enhanced_df.columns.get_loc('Allocation_Check')] = f"={amount_col_letter}{row_num}-{total_allocated_col_letter}{row_num}"
-        # Status formula: IF check is nearly zero, show balanced, else show difference
-        enhanced_df.iloc[i, enhanced_df.columns.get_loc('Allocation_Status')] = f'=IF(ABS({allocation_check_col_letter}{row_num})<0.01,"✅ Balanced","❌ Off by $"&ROUND({allocation_check_col_letter}{row_num},2))'
+        # Status formula: IF check is nearly zero, show balanced, else show difference (NO EMOJIS)
+        enhanced_df.iloc[i, enhanced_df.columns.get_loc('Allocation_Status')] = f'=IF(ABS({allocation_check_col_letter}{row_num})<0.01,"Balanced","Off by $"&ROUND({allocation_check_col_letter}{row_num},2))'
+        # Property formula: IF RLV22 LLC has a value, show "Required", else blank
+        enhanced_df.iloc[i, enhanced_df.columns.get_loc('Property')] = f'=IF({rlv22_col_letter}{row_num}<>0,"Required","")'
     
     # Add totals row
     totals_row_num = num_rows + 2  # After data rows
@@ -151,8 +161,11 @@ def create_excel_with_formulas(df, amount_column):
     # Allocation_Check total (should be zero if everything balances)
     totals_row['Allocation_Check'] = f"=SUM({allocation_check_col_letter}2:{allocation_check_col_letter}{num_rows + 1})"
     
-    # Status for totals row
-    totals_row['Allocation_Status'] = f'=IF(ABS({allocation_check_col_letter}{totals_row_num})<0.01,"✅ ALL BALANCED","❌ TOTAL OFF by $"&ROUND({allocation_check_col_letter}{totals_row_num},2))'
+    # Status for totals row (NO EMOJIS)
+    totals_row['Allocation_Status'] = f'=IF(ABS({allocation_check_col_letter}{totals_row_num})<0.01,"ALL BALANCED","TOTAL OFF by $"&ROUND({allocation_check_col_letter}{totals_row_num},2))'
+    
+    # Property totals - count how many are "Required"
+    totals_row['Property'] = f'=COUNTIF({property_col_letter}2:{property_col_letter}{num_rows + 1},"Required")&" Required"'
     
     # Append totals row
     enhanced_df = pd.concat([enhanced_df, pd.DataFrame([totals_row])], ignore_index=True)
@@ -274,8 +287,8 @@ if uploaded_file is not None:
             # Display full allocation table
             st.subheader("📋 Full Allocation Table")
             
-            # Reorder columns for better display - put amount column first, then entities, then validation
-            amount_and_entity_columns = [amount_column] + ENTITIES + ['Total_Allocated', 'Allocation_Check', 'Allocation_Status']
+            # Reorder columns for better display - put amount column first, then entities, then validation, then Property at the end
+            amount_and_entity_columns = [amount_column] + ENTITIES + ['Total_Allocated', 'Allocation_Check', 'Allocation_Status', 'Property']
             other_columns = [col for col in processed_df.columns if col not in amount_and_entity_columns]
             display_columns = other_columns + amount_and_entity_columns
             
@@ -371,16 +384,19 @@ if uploaded_file is not None:
                 **✅ Live Excel Formulas:**
                 - **Total_Allocated:** `=SUM(F2:K2)` (automatically sums entity columns)
                 - **Allocation_Check:** `=D2-L2` (Amount minus Total_Allocated)
-                - **Allocation_Status:** Shows ✅ Balanced or ❌ Off by $X.XX
+                - **Allocation_Status:** Shows "Balanced" or "Off by $X.XX" (CSV-friendly, no emojis)
+                - **Property:** `=IF(J2<>0,"Required","")` (Shows "Required" if RLV22 LLC has value)
                 
                 **✅ Totals Row at Bottom:**
                 - Sums all columns automatically
                 - Grand total validation
                 - Overall balance check
+                - Property count shows how many are "Required"
                 
                 **✅ Dynamic Updates:**
                 - Edit any entity column → formulas update automatically
                 - Instant feedback if allocations don't balance
+                - Property column updates based on RLV22 LLC values
                 - No manual calculations needed!
                 
                 ### 📋 How to Use in Excel:
@@ -389,12 +405,14 @@ if uploaded_file is not None:
                 3. **Edit entity columns** to redistribute amounts
                 4. **Watch formulas update** automatically
                 5. **Check totals row** for overall balance
+                6. **Property column** shows "Required" when RLV22 LLC has values
                 
                 ### 💡 Tips:
-                - **Green checkmarks** = Balanced transactions
-                - **Red X marks** = Need adjustment
+                - **"Balanced"** = Transaction is properly allocated
+                - **"Off by $X"** = Transaction needs adjustment
                 - **Totals row** shows if entire statement balances
                 - **All credits and debits** start in Panola Holdings LLC
+                - **Property column** automatically tracks RLV22 LLC usage
                 """)
 
     except Exception as e:
@@ -449,3 +467,4 @@ else:
     
     **Perfect for Excel:** Formulas activate automatically when opened in Excel!
     """)
+    
