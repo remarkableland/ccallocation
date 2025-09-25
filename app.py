@@ -389,31 +389,37 @@ if uploaded_file is not None:
             original_filename = uploaded_file.name
             if original_filename.endswith('.csv'):
                 base_name = original_filename[:-4]  # Remove .csv extension
-                enhanced_filename = f"{base_name}_allocated.csv"
+                enhanced_filename = f"{base_name}_allocated.xlsx"
             else:
-                enhanced_filename = f"{original_filename}_allocated.csv"
+                enhanced_filename = f"{original_filename}_allocated.xlsx"
             
             # Create enhanced version with formulas and totals
             with st.spinner("Creating Excel-ready file with formulas..."):
                 enhanced_df = create_excel_with_formulas(processed_df, amount_column)
             
-            # Main allocation CSV with formulas - single download option
-            st.write("**📊 Enhanced Allocation File (with formulas & totals):**")
-            enhanced_csv = enhanced_df.to_csv(index=False)
+            # Main allocation Excel file with formulas - single download option
+            st.write("**📊 Enhanced Allocation File (Excel with formulas & totals):**")
+            
+            # Create Excel file in memory
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                enhanced_df.to_excel(writer, sheet_name='Allocations', index=False)
+            output.seek(0)
+            
             st.download_button(
-                label="📄 Download Allocated File",
-                data=enhanced_csv,
+                label="📄 Download Allocated Excel File",
+                data=output.getvalue(),
                 file_name=enhanced_filename,
-                mime="text/csv",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True
             )
-            st.caption("✅ Includes Excel formulas, totals row, and property tracking")
+            st.caption("✅ Native Excel file with formulas, totals row, and property tracking")
             
             # Instructions for Excel usage
             with st.expander("📖 Excel Formula Features"):
                 st.markdown("""
-                ### 🚀 Enhanced CSV Features:
-                The **Enhanced Allocations CSV** includes:
+                ### 🚀 Enhanced Excel Features:
+                The **Enhanced Allocations Excel File** includes:
                 
                 **✅ Default Allocation Logic:**
                 - **Panola Holdings LLC = Column D + Column E** (automatic sum)
@@ -438,9 +444,9 @@ if uploaded_file is not None:
                 - Property column updates based on RLV22 LLC values
                 - No manual calculations needed!
                 
-                ### 📋 How to Use in Excel:
-                1. **Download Enhanced_Allocations.csv**
-                2. **Open in Excel** (formulas will activate)
+                ### 📋 How to Use:
+                1. **Download Enhanced_Allocations.xlsx**
+                2. **Open in Excel** (formulas work immediately - no conversion needed!)
                 3. **Edit entity columns** to redistribute amounts
                 4. **Watch formulas update** automatically
                 5. **Check totals row** for overall balance
@@ -506,10 +512,10 @@ else:
     - **Live updates** when you edit allocations
     - **Property column** tracks RLV22 LLC usage
     
-    ### 📊 Enhanced CSV Output:
-    - **Enhanced File:** With Excel formulas and totals row
-    - **Basic File:** Standard CSV for other uses
-    - **Summary Report:** Overall metrics and validation
+    ### 📊 Enhanced Excel Output:
+    - **Enhanced File:** Native Excel with formulas and totals row
+    - **Professional formatting:** No conversion needed
+    - **Immediate formula activation:** Works right when you open it
     
-    **Perfect for Excel:** Formulas activate automatically when opened in Excel!
+    **Perfect Excel Integration:** Download and use immediately in Excel!
     """)
