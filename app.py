@@ -59,10 +59,10 @@ def process_credit_card_data(df, amount_column):
     for entity in ENTITIES:
         processed_df[entity] = 0.0
     
-    # DEFAULT ALLOCATION: All amounts go to Panola Holdings LLC
+    # DEFAULT ALLOCATION: All amounts (both positive charges AND negative credits) go to Panola Holdings LLC
     processed_df['Panola Holdings LLC'] = processed_df[amount_column]
     
-    # Add validation columns
+    # Add validation columns - but we'll replace these with Excel formulas
     processed_df['Total_Allocated'] = processed_df[ENTITIES].sum(axis=1)
     processed_df['Allocation_Check'] = processed_df[amount_column] - processed_df['Total_Allocated']
     processed_df['Allocation_Status'] = processed_df['Allocation_Check'].apply(
@@ -70,6 +70,94 @@ def process_credit_card_data(df, amount_column):
     )
     
     return processed_df
+
+def create_excel_with_formulas(df, amount_column):
+    """Create CSV content with Excel formula placeholders for the check column and totals"""
+    
+    # Find the column positions (Excel uses 1-based indexing)
+    columns = df.columns.tolist()
+    amount_col_idx = columns.index(amount_column) + 1  # Excel column number
+    
+    # Find entity column positions
+    entity_col_positions = {}
+    for entity in ENTITIES:
+        if entity in columns:
+            entity_col_positions[entity] = columns.index(entity) + 1
+    
+    total_allocated_col_idx = columns.index('Total_Allocated') + 1
+    allocation_check_col_idx = columns.index('Allocation_Check') + 1
+    
+    # Convert to Excel column letters
+    def num_to_excel_col(n):
+        result = ""
+        while n > 0:
+            n -= 1
+            result = chr(n % 26 + ord('A')) + result
+            n //= 26
+        return result
+    
+    amount_col_letter = num_to_excel_col(amount_col_idx)
+    total_allocated_col_letter = num_to_excel_col(total_allocated_col_idx)
+    allocation_check_col_letter = num_to_excel_col(allocation_check_col_idx)
+    
+    # Entity column letters
+    entity_col_letters = {}
+    for entity, pos in entity_col_positions.items():
+        entity_col_letters[entity] = num_to_excel_col(pos)
+    
+    # Create the enhanced DataFrame
+    enhanced_df = df.copy()
+    
+    # Replace the static calculations with formula placeholders
+    num_rows = len(df)
+    
+    # Total_Allocated formulas (sum of entity columns for each row)
+    entity_range_start = num_to_excel_col(entity_col_positions[ENTITIES[0]])
+    entity_range_end = num_to_excel_col(entity_col_positions[ENTITIES[-1]])
+    
+    for i in range(num_rows):
+        row_num = i + 2  # Excel rows start at 1, plus header row
+        # Total_Allocated formula: sum of all entity columns
+        enhanced_df.iloc[i, enhanced_df.columns.get_loc('Total_Allocated')] = f"=SUM({entity_range_start}{row_num}:{entity_range_end}{row_num})"
+        # Allocation_Check formula: Amount - Total_Allocated
+        enhanced_df.iloc[i, enhanced_df.columns.get_loc('Allocation_Check')] = f"={amount_col_letter}{row_num}-{total_allocated_col_letter}{row_num}"
+        # Status formula: IF check is nearly zero, show balanced, else show difference
+        enhanced_df.iloc[i, enhanced_df.columns.get_loc('Allocation_Status')] = f'=IF(ABS({allocation_check_col_letter}{row_num})<0.01,"✅ Balanced","❌ Off by $"&ROUND({allocation_check_col_letter}{row_num},2))'
+    
+    # Add totals row
+    totals_row_num = num_rows + 2  # After data rows
+    totals_row = {}
+    
+    # Initialize totals row
+    for col in enhanced_df.columns:
+        totals_row[col] = ""
+    
+    # First column gets "TOTALS" label
+    first_col = enhanced_df.columns[0]
+    totals_row[first_col] = "TOTALS"
+    
+    # Amount column total
+    totals_row[amount_column] = f"=SUM({amount_col_letter}2:{amount_col_letter}{num_rows + 1})"
+    
+    # Entity column totals
+    for entity in ENTITIES:
+        if entity in enhanced_df.columns:
+            col_letter = entity_col_letters[entity]
+            totals_row[entity] = f"=SUM({col_letter}2:{col_letter}{num_rows + 1})"
+    
+    # Total_Allocated total
+    totals_row['Total_Allocated'] = f"=SUM({total_allocated_col_letter}2:{total_allocated_col_letter}{num_rows + 1})"
+    
+    # Allocation_Check total (should be zero if everything balances)
+    totals_row['Allocation_Check'] = f"=SUM({allocation_check_col_letter}2:{allocation_check_col_letter}{num_rows + 1})"
+    
+    # Status for totals row
+    totals_row['Allocation_Status'] = f'=IF(ABS({allocation_check_col_letter}{totals_row_num})<0.01,"✅ ALL BALANCED","❌ TOTAL OFF by $"&ROUND({allocation_check_col_letter}{totals_row_num},2))'
+    
+    # Append totals row
+    enhanced_df = pd.concat([enhanced_df, pd.DataFrame([totals_row])], ignore_index=True)
+    
+    return enhanced_df
 
 def validate_allocations(df, amount_column):
     """Validate that all transactions are properly allocated"""
@@ -131,7 +219,7 @@ if uploaded_file is not None:
             with st.spinner("Processing allocations..."):
                 processed_df = process_credit_card_data(df, amount_column)
             
-            st.success("✅ Processing complete! All transactions defaulted to Panola Holdings LLC")
+            st.success("✅ Processing complete! All transactions (charges AND credits) defaulted to Panola Holdings LLC")
             
             # Display processed data
             st.subheader("💰 Allocation Results")
@@ -154,6 +242,19 @@ if uploaded_file is not None:
                 allocation_difference = total_amount - total_allocated
                 st.metric("Allocation Check", f"${allocation_difference:,.2f}", 
                          delta_color="inverse" if abs(allocation_difference) > 0.01 else "normal")
+            
+            # Show credit/debit breakdown
+            credits = processed_df[processed_df[amount_column] < 0]
+            debits = processed_df[processed_df[amount_column] > 0]
+            
+            with st.expander("💳 Transaction Breakdown"):
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.write(f"**Credits (Payments):** {len(credits):,} transactions")
+                    st.write(f"**Credit Total:** ${credits[amount_column].sum():,.2f}")
+                with col2:
+                    st.write(f"**Debits (Charges):** {len(debits):,} transactions")
+                    st.write(f"**Debit Total:** ${debits[amount_column].sum():,.2f}")
             
             # Entity breakdown
             st.subheader("🏢 Entity Allocation Summary")
@@ -212,24 +313,42 @@ if uploaded_file is not None:
             # Generate timestamp for filenames
             current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
             
-            # Main allocation CSV
+            # Create enhanced version with formulas and totals
+            with st.spinner("Creating Excel-ready file with formulas..."):
+                enhanced_df = create_excel_with_formulas(processed_df, amount_column)
+            
+            # Main allocation CSV with formulas
             col1, col2, col3 = st.columns(3)
             
             with col1:
-                st.write("**Main Allocation File:**")
-                allocation_csv = processed_df.to_csv(index=False)
+                st.write("**📊 Main Allocation File (with formulas & totals):**")
+                enhanced_csv = enhanced_df.to_csv(index=False)
                 st.download_button(
-                    label="📄 Download Allocations.csv",
-                    data=allocation_csv,
-                    file_name=f"credit_card_allocations_{current_time}.csv",
+                    label="📄 Download Enhanced_Allocations.csv",
+                    data=enhanced_csv,
+                    file_name=f"enhanced_credit_card_allocations_{current_time}.csv",
                     mime="text/csv"
                 )
+                st.caption("✅ Includes Excel formulas & totals row")
             
             with col2:
-                st.write("**Summary Report:**")
+                st.write("**📋 Basic Allocation File:**")
+                basic_csv = processed_df.to_csv(index=False)
+                st.download_button(
+                    label="📄 Download Basic_Allocations.csv",
+                    data=basic_csv,
+                    file_name=f"basic_credit_card_allocations_{current_time}.csv",
+                    mime="text/csv"
+                )
+                st.caption("Standard CSV without formulas")
+            
+            with col3:
+                st.write("**📊 Summary Report:**")
                 summary_df = pd.DataFrame([
                     {'Metric': 'Total Transactions', 'Value': len(processed_df)},
                     {'Metric': 'Total Amount', 'Value': f"${total_amount:,.2f}"},
+                    {'Metric': 'Total Credits', 'Value': f"${credits[amount_column].sum():,.2f}"},
+                    {'Metric': 'Total Debits', 'Value': f"${debits[amount_column].sum():,.2f}"},
                     {'Metric': 'Total Allocated', 'Value': f"${total_allocated:,.2f}"},
                     {'Metric': 'Allocation Check', 'Value': f"${allocation_difference:.2f}"},
                     {'Metric': 'Unbalanced Transactions', 'Value': validation['unbalanced_count']},
@@ -243,34 +362,39 @@ if uploaded_file is not None:
                     mime="text/csv"
                 )
             
-            with col3:
-                st.write("**Entity Totals:**")
-                entity_df = pd.DataFrame([
-                    {'Entity': entity, 'Total': f"${total:,.2f}"} 
-                    for entity, total in validation['entity_totals'].items()
-                ])
-                entity_csv = entity_df.to_csv(index=False)
-                st.download_button(
-                    label="🏢 Download Entity_Totals.csv",
-                    data=entity_csv,
-                    file_name=f"entity_totals_{current_time}.csv",
-                    mime="text/csv"
-                )
-            
-            # Instructions for Excel conversion
-            with st.expander("📖 Converting to Excel"):
+            # Instructions for Excel usage
+            with st.expander("📖 Excel Formula Features"):
                 st.markdown("""
-                ### Converting CSV to Excel:
-                1. **Download the main allocation CSV** above
-                2. **Open in Excel** (or Google Sheets, LibreOffice Calc)
-                3. **Save As Excel format** (.xlsx) for easier editing
-                4. **Edit entity columns** to redistribute amounts
-                5. **Use Allocation_Check column** to verify your edits sum correctly
+                ### 🚀 Enhanced CSV Features:
+                The **Enhanced Allocations CSV** includes:
                 
-                ### Quick Excel Formula Tips:
-                - **Check row totals:** `=SUM(E2:J2)` (adjust column range for entity columns)
-                - **Verify balance:** `=D2-K2` (Amount minus Total_Allocated should be 0)
-                - **Conditional formatting:** Highlight cells where Allocation_Check ≠ 0
+                **✅ Live Excel Formulas:**
+                - **Total_Allocated:** `=SUM(F2:K2)` (automatically sums entity columns)
+                - **Allocation_Check:** `=D2-L2` (Amount minus Total_Allocated)
+                - **Allocation_Status:** Shows ✅ Balanced or ❌ Off by $X.XX
+                
+                **✅ Totals Row at Bottom:**
+                - Sums all columns automatically
+                - Grand total validation
+                - Overall balance check
+                
+                **✅ Dynamic Updates:**
+                - Edit any entity column → formulas update automatically
+                - Instant feedback if allocations don't balance
+                - No manual calculations needed!
+                
+                ### 📋 How to Use in Excel:
+                1. **Download Enhanced_Allocations.csv**
+                2. **Open in Excel** (formulas will activate)
+                3. **Edit entity columns** to redistribute amounts
+                4. **Watch formulas update** automatically
+                5. **Check totals row** for overall balance
+                
+                ### 💡 Tips:
+                - **Green checkmarks** = Balanced transactions
+                - **Red X marks** = Need adjustment
+                - **Totals row** shows if entire statement balances
+                - **All credits and debits** start in Panola Holdings LLC
                 """)
 
     except Exception as e:
@@ -313,15 +437,15 @@ else:
     - NDRE III LLC
     
     ### ✅ Built-in Validation:
-    - Automatic allocation verification
-    - Check totals to ensure 100% allocation
-    - Balance validation for each transaction
-    - Highlights any unbalanced transactions
+    - **Excel formulas** for automatic balance checking
+    - **Totals row** at bottom of each column
+    - **Live updates** when you edit allocations
+    - **Credits AND debits** both default to Panola
     
-    ### 📊 CSV Output (No Dependencies):
-    - **Main Allocation File:** Full data with entity columns
-    - **Summary Report:** Metrics and validation results
-    - **Entity Totals:** Breakdown by entity
+    ### 📊 Enhanced CSV Output:
+    - **Enhanced File:** With Excel formulas and totals row
+    - **Basic File:** Standard CSV for other uses
+    - **Summary Report:** Overall metrics and validation
     
-    **Convert to Excel:** Open any CSV in Excel and save as .xlsx for easier editing!
+    **Perfect for Excel:** Formulas activate automatically when opened in Excel!
     """)
