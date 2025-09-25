@@ -59,9 +59,32 @@ def process_credit_card_data(df, amount_column):
     for entity in ENTITIES:
         processed_df[entity] = 0.0
     
-    # DEFAULT ALLOCATION: All amounts (both positive charges AND negative credits) go to Panola Holdings LLC
-    # This ensures ALL transactions, including credits/payments, default to Panola
-    processed_df['Panola Holdings LLC'] = processed_df[amount_column].copy()
+    # Get column positions to understand D and E
+    columns = processed_df.columns.tolist()
+    
+    # Check if we have at least 6 columns (A, B, C, D, E, F...)
+    if len(columns) >= 6:
+        col_d = columns[3]  # 4th column (index 3) = Column D
+        col_e = columns[4]  # 5th column (index 4) = Column E
+        
+        # Try to make D and E numeric
+        try:
+            processed_df[col_d] = pd.to_numeric(processed_df[col_d], errors='coerce').fillna(0)
+            processed_df[col_e] = pd.to_numeric(processed_df[col_e], errors='coerce').fillna(0)
+            
+            # DEFAULT ALLOCATION: Panola Holdings LLC = sum of columns D and E
+            processed_df['Panola Holdings LLC'] = processed_df[col_d] + processed_df[col_e]
+            
+            st.info(f"✅ Default allocation: Panola Holdings LLC = {col_d} + {col_e}")
+            
+        except:
+            # Fallback to amount column if D and E aren't numeric
+            processed_df['Panola Holdings LLC'] = processed_df[amount_column]
+            st.warning(f"⚠️ Could not use columns D+E, defaulting to {amount_column}")
+    else:
+        # Fallback to amount column if not enough columns
+        processed_df['Panola Holdings LLC'] = processed_df[amount_column]
+        st.warning(f"⚠️ Not enough columns for D+E logic, defaulting to {amount_column}")
     
     # Add validation columns - but we'll replace these with Excel formulas
     processed_df['Total_Allocated'] = processed_df[ENTITIES].sum(axis=1)
@@ -207,6 +230,11 @@ if uploaded_file is not None:
         st.write(f"**Loaded:** {len(df):,} transactions")
         st.dataframe(df.head(10), use_container_width=True)
         
+        # Show column mapping
+        columns = df.columns.tolist()
+        if len(columns) >= 6:
+            st.info(f"📋 **Column Mapping:** A={columns[0]}, B={columns[1]}, C={columns[2]}, **D={columns[3]}**, **E={columns[4]}**, F=Panola Holdings LLC")
+        
         # Detect amount column
         amount_column = detect_amount_column(df)
         
@@ -232,7 +260,7 @@ if uploaded_file is not None:
             with st.spinner("Processing allocations..."):
                 processed_df = process_credit_card_data(df, amount_column)
             
-            st.success("✅ Processing complete! All transactions (charges AND credits) defaulted to Panola Holdings LLC")
+            st.success("✅ Processing complete! Default allocation: Panola Holdings LLC = Column D + Column E")
             
             # Display processed data
             st.subheader("💰 Allocation Results")
@@ -256,18 +284,27 @@ if uploaded_file is not None:
                 st.metric("Allocation Check", f"${allocation_difference:,.2f}", 
                          delta_color="inverse" if abs(allocation_difference) > 0.01 else "normal")
             
-            # Show credit/debit breakdown
-            credits = processed_df[processed_df[amount_column] < 0]
-            debits = processed_df[processed_df[amount_column] > 0]
-            
-            with st.expander("💳 Transaction Breakdown"):
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.write(f"**Credits (Payments):** {len(credits):,} transactions")
-                    st.write(f"**Credit Total:** ${credits[amount_column].sum():,.2f}")
-                with col2:
-                    st.write(f"**Debits (Charges):** {len(debits):,} transactions")
-                    st.write(f"**Debit Total:** ${debits[amount_column].sum():,.2f}")
+            # Show D+E breakdown if applicable
+            columns = processed_df.columns.tolist()
+            if len(columns) >= 6:
+                col_d = columns[3]  # Column D
+                col_e = columns[4]  # Column E
+                
+                # Check if D and E are numeric
+                try:
+                    d_total = pd.to_numeric(processed_df[col_d], errors='coerce').sum()
+                    e_total = pd.to_numeric(processed_df[col_e], errors='coerce').sum()
+                    
+                    with st.expander("📊 Column D + E Breakdown"):
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.write(f"**{col_d} Total:** ${d_total:,.2f}")
+                        with col2:
+                            st.write(f"**{col_e} Total:** ${e_total:,.2f}")
+                        with col3:
+                            st.write(f"**D+E Total:** ${d_total + e_total:,.2f}")
+                except:
+                    st.info("ℹ️ Columns D and E are not numeric - using amount column fallback")
             
             # Entity breakdown
             st.subheader("🏢 Entity Allocation Summary")
@@ -360,8 +397,6 @@ if uploaded_file is not None:
                 summary_df = pd.DataFrame([
                     {'Metric': 'Total Transactions', 'Value': len(processed_df)},
                     {'Metric': 'Total Amount', 'Value': f"${total_amount:,.2f}"},
-                    {'Metric': 'Total Credits', 'Value': f"${credits[amount_column].sum():,.2f}"},
-                    {'Metric': 'Total Debits', 'Value': f"${debits[amount_column].sum():,.2f}"},
                     {'Metric': 'Total Allocated', 'Value': f"${total_allocated:,.2f}"},
                     {'Metric': 'Allocation Check', 'Value': f"${allocation_difference:.2f}"},
                     {'Metric': 'Unbalanced Transactions', 'Value': validation['unbalanced_count']},
@@ -381,11 +416,16 @@ if uploaded_file is not None:
                 ### 🚀 Enhanced CSV Features:
                 The **Enhanced Allocations CSV** includes:
                 
+                **✅ Default Allocation Logic:**
+                - **Panola Holdings LLC = Column D + Column E** (automatic sum)
+                - Handles both positive and negative amounts
+                - Falls back to amount column if D/E aren't numeric
+                
                 **✅ Live Excel Formulas:**
                 - **Total_Allocated:** `=SUM(F2:K2)` (automatically sums entity columns)
-                - **Allocation_Check:** `=D2-L2` (Amount minus Total_Allocated)
-                - **Allocation_Status:** Shows "Balanced" or "Off by $X.XX" (CSV-friendly, no emojis)
-                - **Property:** `=IF(J2<>0,"Required","")` (Shows "Required" if RLV22 LLC has value)
+                - **Allocation_Check:** `=Amount-Total_Allocated` 
+                - **Allocation_Status:** Shows "Balanced" or "Off by $X.XX" (CSV-friendly)
+                - **Property:** `=IF(RLV22<>0,"Required","")` (Shows "Required" if RLV22 LLC has value)
                 
                 **✅ Totals Row at Bottom:**
                 - Sums all columns automatically
@@ -411,7 +451,7 @@ if uploaded_file is not None:
                 - **"Balanced"** = Transaction is properly allocated
                 - **"Off by $X"** = Transaction needs adjustment
                 - **Totals row** shows if entire statement balances
-                - **All credits and debits** start in Panola Holdings LLC
+                - **Column D + E** automatically populate Panola Holdings LLC
                 - **Property column** automatically tracks RLV22 LLC usage
                 """)
 
@@ -435,19 +475,26 @@ else:
     
     # Sample format guide
     st.markdown("""
-    ### 📋 Flexible CSV Format:
-    This tool automatically detects amount columns from common variations:
-    - **Amount**, **Transaction Amount**, **Debit**, **Credit**
-    - Or any numeric column that might contain transaction amounts
+    ### 📋 How It Works:
+    This tool uses a **Column D + Column E** allocation strategy:
     
-    Your CSV can contain any columns - the tool will:
-    1. Auto-detect the amount column
-    2. Allow manual override if needed
-    3. Preserve all original data
+    **✅ Default Allocation Logic:**
+    - **Panola Holdings LLC = Column D + Column E**
+    - Automatically detects and sums the 4th and 5th columns
+    - Handles both positive (charges) and negative (credits) amounts
+    - Falls back to amount column if D/E aren't numeric
+    
+    **✅ Column Mapping:**
+    - **Column A:** First column in your CSV
+    - **Column B:** Second column in your CSV  
+    - **Column C:** Third column in your CSV
+    - **Column D:** Fourth column in your CSV *(used for allocation)*
+    - **Column E:** Fifth column in your CSV *(used for allocation)*
+    - **Column F:** Becomes "Panola Holdings LLC" = D + E
     
     ### 🏢 Entity Allocation:
     The tool will create allocation columns for:
-    - **Panola Holdings LLC** *(default allocation - all transactions start here)*
+    - **Panola Holdings LLC** *(default = Column D + Column E)*
     - Robert Dow (Personal)
     - RLV22 LLC
     - CSD Van Zandt LLC  
@@ -458,7 +505,7 @@ else:
     - **Excel formulas** for automatic balance checking
     - **Totals row** at bottom of each column
     - **Live updates** when you edit allocations
-    - **Credits AND debits** both default to Panola
+    - **Property column** tracks RLV22 LLC usage
     
     ### 📊 Enhanced CSV Output:
     - **Enhanced File:** With Excel formulas and totals row
@@ -467,4 +514,3 @@ else:
     
     **Perfect for Excel:** Formulas activate automatically when opened in Excel!
     """)
-    
